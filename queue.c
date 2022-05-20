@@ -21,7 +21,7 @@ element_t *element_new(char *s)
     if (s == NULL)
         return node;
 
-    int s_len = strlen(*s) + 1;
+    int s_len = strlen(s) + 1;
     /*char array*/
     char *str;
     /* sizeof(char)=1*/
