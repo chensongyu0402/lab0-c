@@ -185,6 +185,36 @@ void q_reverse(struct list_head *head)
         list_move(node, head);
 }
 
+/* Merge Alogorithm */
+struct list_head *merge(struct list_head *left, struct list_head *right)
+{
+    struct list_head *head;
+    
+    int cmp = strcmp(list_entry(left, element_t, list)->value,
+                     list_entry(right, element_t, list)->value);
+    struct list_head **chosen = 
+        cmp <= 0 ? &left : &right;
+    head = *chosen;
+    (*chosen) = (*chosen)->next;
+    list_del_init(head);
+
+    while (left->next != head || right->next != head) {
+        cmp = strcmp(list_entry(left, element_t, list)->value,
+                     list_entry(right, element_t, list)->value);
+        chosen = cmp <=0 ? &left : &right;
+        list_move_tail((*chosen = (*chosen)->next)->prev, head);
+    }
+    struct list_head *remain = left->next != head ? left : right;
+    struct list_head *tail = head->prev;
+    
+    head->prev = remain->prev;
+    head->prev->next = head;
+    remain->prev = tail;
+    remain->prev->next = remain;
+
+    return head;
+}
+
 /* Sort elements of queue in ascending order */
 void q_sort(struct list_head *head)
 {
