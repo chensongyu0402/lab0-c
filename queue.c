@@ -186,4 +186,36 @@ void q_reverse(struct list_head *head)
 }
 
 /* Sort elements of queue in ascending order */
-void q_sort(struct list_head *head) {}
+void q_sort(struct list_head *head)
+{
+    if (!head || list_empty(head) || list_is_singular(head))
+        return;        
+    
+    /* Each node itself is a sorted list */
+    struct list_head *cur, *safe;
+    list_for_each_safe (cur, safe, head)
+        cur->prev = cur;
+    
+    /* Pointer first points to first sorted list */
+    struct list_head *first = head->next;
+    INIT_LIST_HEAD(head);
+    while (first->prev->next != head) {
+        struct list_head **last = &first;
+        struct list_head *next_list = (*last)->prev->next;
+        struct list_head *next_next_list = next_list->prev->next;
+        
+        while ((*last) != head && next_list != head){
+            /* Merge two list */
+            (*last)->prev->next = (*last);
+            next_list->prev->next = next_list;
+            (*last) = merge((*last), next_list);
+
+            /* Next to last,next_list,next_next_list*/
+            last = &((*last)->prev->next);
+            *last = next_next_list;
+            next_list = (*last)->prev->next;
+            next_next_list = next_list->prev->next;
+        }
+    }
+    list_add_tail(head, first);
+}
