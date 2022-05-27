@@ -248,3 +248,27 @@ void q_sort(struct list_head *head)
     }
     list_add_tail(head, first);
 }
+
+/* Random queue */
+void q_shuffle(struct list_head *head)
+{
+    if (!head || list_empty(head))
+        return;
+
+    srand(time(NULL));
+    int n = q_size(head);
+
+    struct list_head *first = head->next;
+    list_del_init(head);
+
+    for (int i = 0; i < n - 1; i++) {
+        int rnd = rand() % (n - i);
+        int dir = rnd > (n - i) / 2 ? 0 : 1;
+        rnd = dir ? n - i - rnd : rnd;
+        for (int j = 0; j < rnd; j++) {
+            first = dir ? first->prev : first->next;
+        }
+        list_move(first->next, head);
+    }
+    list_move(first, head);
+}
