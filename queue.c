@@ -47,19 +47,15 @@ struct list_head *q_new()
 /* Free all storage used by queue */
 void q_free(struct list_head *l)
 {
-    if (!l)
-        return;
-    if (list_empty(l)) {
+    if (!l || list_empty(l)) {
         free(l);
         return;
     }
     element_t *entry, *safe;
-    list_for_each_entry_safe (entry, safe, l, list) {
-        if (entry->value)
-            free(entry->value);
-        free(entry);
-    }
+    list_for_each_entry_safe (entry, safe, l, list)
+        q_release_element(entry);
     free(l);
+
     return;
 }
 
@@ -189,11 +185,10 @@ void q_reverse(struct list_head *head)
 struct list_head *merge(struct list_head *left, struct list_head *right)
 {
     struct list_head *head;
-    
+
     int cmp = strcmp(list_entry(left, element_t, list)->value,
                      list_entry(right, element_t, list)->value);
-    struct list_head **chosen = 
-        cmp <= 0 ? &left : &right;
+    struct list_head **chosen = cmp <= 0 ? &left : &right;
     head = *chosen;
     (*chosen) = (*chosen)->next;
     list_del_init(head);
@@ -201,12 +196,12 @@ struct list_head *merge(struct list_head *left, struct list_head *right)
     while (left->next != head || right->next != head) {
         cmp = strcmp(list_entry(left, element_t, list)->value,
                      list_entry(right, element_t, list)->value);
-        chosen = cmp <=0 ? &left : &right;
+        chosen = cmp <= 0 ? &left : &right;
         list_move_tail((*chosen = (*chosen)->next)->prev, head);
     }
     struct list_head *remain = left->next != head ? left : right;
     struct list_head *tail = head->prev;
-    
+
     head->prev = remain->prev;
     head->prev->next = head;
     remain->prev = tail;
@@ -219,13 +214,12 @@ struct list_head *merge(struct list_head *left, struct list_head *right)
 void q_sort(struct list_head *head)
 {
     if (!head || list_empty(head) || list_is_singular(head))
-        return;        
-    
+        return;
     /* Each node itself is a sorted list */
     struct list_head *cur, *safe;
     list_for_each_safe (cur, safe, head)
         cur->prev = cur;
-    
+
     /* Pointer first points to first sorted list */
     struct list_head *first = head->next;
     INIT_LIST_HEAD(head);
@@ -233,8 +227,8 @@ void q_sort(struct list_head *head)
         struct list_head **last = &first;
         struct list_head *next_list = (*last)->prev->next;
         struct list_head *next_next_list = next_list->prev->next;
-        
-        while ((*last) != head && next_list != head){
+
+        while ((*last) != head && next_list != head) {
             /* Merge two list */
             (*last)->prev->next = (*last);
             next_list->prev->next = next_list;
