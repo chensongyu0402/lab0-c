@@ -12,8 +12,15 @@
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
+
+#include <math.h>
+
 #include "dudect/fixture.h"
 #include "list.h"
+
+#include <linux/types.h>
+#define likely(x) __builtin_expect(!!(x), 1)
+#define unlikely(x) __builtin_expect(!!(x), 0)
 
 /* Our program needs to use regular malloc/free */
 #define INTERNAL 1
@@ -25,7 +32,8 @@
 /* How much padding should be added to check for string overrun? */
 #define STRINGPAD MAXSTRING
 
-/* It is a bit sketchy to use this #include file on the solution version of the
+/*
+ * It is a bit sketchy to use this #include file on the solution version of the
  * code.
  * OK as long as head field of queue_t structure is in first position in
  * solution code
@@ -39,12 +47,14 @@
 
 #define HISTORY_LEN 20
 
-/* How large is a queue before it's considered big.
+/*
+ * How large is a queue before it's considered big.
  * This affects how it gets printed
  * and whether cautious mode is used when freeing the queue
  */
 #define BIG_LIST 30
 static int big_list_size = BIG_LIST;
+
 
 /* Global variables */
 
@@ -66,12 +76,36 @@ static int fail_count = 0;
 
 static int string_length = MAXSTRING;
 
+extern int cmp_count;
+
 #define MIN_RANDSTR_LEN 5
 #define MAX_RANDSTR_LEN 10
 static const char charset[] = "abcdefghijklmnopqrstuvwxyz";
 
 /* Forward declarations */
 static bool show_queue(int vlevel);
+
+double average_K(int size, int kernel);
+
+/* Function in queue.c */
+extern void q_shuffle(struct list_head *head);
+
+typedef int
+    __attribute__((nonnull(2, 3))) (*list_cmp_func_t)(void *,
+                                                      const struct list_head *,
+                                                      const struct list_head *);
+static void merge_final(void *priv,
+                        list_cmp_func_t cmp,
+                        struct list_head *head,
+                        struct list_head *a,
+                        struct list_head *b);
+void list_sort(void *priv, struct list_head *head, list_cmp_func_t cmp);
+static struct list_head *merge(void *priv,
+                               list_cmp_func_t cmp,
+                               struct list_head *a,
+                               struct list_head *b);
+
+int my_cmp(void *, const struct list_head *, const struct list_head *);
 
 static bool do_free(int argc, char *argv[])
 {
@@ -132,7 +166,8 @@ static bool do_new(int argc, char *argv[])
     return ok && !error_check();
 }
 
-/* TODO: Add a buf_size check of if the buf_size may be less
+/*
+ * TODO: Add a buf_size check of if the buf_size may be less
  * than MIN_RANDSTR_LEN.
  */
 static void fill_rand_string(char *buf, size_t buf_size)
@@ -141,8 +176,9 @@ static void fill_rand_string(char *buf, size_t buf_size)
     while (len < MIN_RANDSTR_LEN)
         len = rand() % buf_size;
 
-    for (size_t n = 0; n < len; n++)
+    for (size_t n = 0; n < len; n++) {
         buf[n] = charset[rand() % (sizeof charset - 1)];
+    }
     buf[len] = '\0';
 }
 
@@ -389,7 +425,8 @@ static bool do_remove(int option, int argc, char *argv[])
             ok = false;
         }
 
-        /* Check whether padding in array removes are still initial value 'X'.
+        /*
+         * Check whether padding in array removes are still initial value 'X'.
          * If there's other character in padding, it's overflowed.
          */
         int i = string_length + 1;
@@ -488,7 +525,7 @@ static bool do_dedup(int argc, char *argv[])
     }
 
     LIST_HEAD(l_copy);
-    element_t *item = NULL, *tmp = NULL;
+    element_t *item, *tmp;
 
     // Copy l_meta.l to l_copy
     if (l_meta.l && !list_empty(l_meta.l)) {
@@ -672,7 +709,51 @@ bool do_sort(int argc, char *argv[])
             element_t *item, *next_item;
             item = list_entry(cur_l, element_t, list);
             next_item = list_entry(cur_l->next, element_t, list);
-            if (strcmp(item->value, next_item->value) > 0) {
+            if (strcasecmp(item->value, next_item->value) > 0) {
+                report(1, "ERROR: Not sorted in ascending order");
+                ok = false;
+                break;
+            }
+        }
+    }
+
+    show_queue(3);
+    return ok && !error_check();
+}
+
+
+bool do_kernel_sort(int argc, char *argv[])
+{
+    if (argc != 1) {
+        report(1, "%s takes no arguments", argv[0]);
+        return false;
+    }
+
+    if (!l_meta.l)
+        report(3, "Warning: Calling sort on null queue");
+    error_check();
+
+    int cnt = q_size(l_meta.l);
+    if (cnt < 2)
+        report(3, "Warning: Calling sort on single node");
+    error_check();
+
+    set_noallocate_mode(true);
+    if (exception_setup(true))
+        list_sort(NULL, l_meta.l, my_cmp);
+    exception_cancel();
+    set_noallocate_mode(false);
+
+    bool ok = true;
+    if (l_meta.size) {
+        for (struct list_head *cur_l = l_meta.l->next;
+             cur_l != l_meta.l && --cnt; cur_l = cur_l->next) {
+            /* Ensure each element in ascending order */
+            /* FIXME: add an option to specify sorting order */
+            element_t *item, *next_item;
+            item = list_entry(cur_l, element_t, list);
+            next_item = list_entry(cur_l->next, element_t, list);
+            if (strcasecmp(item->value, next_item->value) > 0) {
                 report(1, "ERROR: Not sorted in ascending order");
                 ok = false;
                 break;
@@ -807,6 +888,75 @@ static bool do_show(int argc, char *argv[])
     return show_queue(0);
 }
 
+
+static bool do_shuffle(int argc, char *argv[])
+{
+    if (argc != 1) {
+        report(1, "%s takes no arguments", argv[0]);
+        return false;
+    }
+
+    if (!l_meta.l)
+        report(3, "Warning: Try to access null queue");
+    error_check();
+
+    set_noallocate_mode(true);
+    if (exception_setup(true))
+        q_shuffle(l_meta.l);
+    exception_cancel();
+
+    set_noallocate_mode(false);
+
+    show_queue(3);
+    return !error_check();
+}
+
+
+static bool do_average_k(int argc, char *argv[])
+{
+    if (argc != 3) {
+        report(1, "%s needs 2 arguments", argv[0]);
+        return false;
+    }
+
+    int kernel;
+
+    if (!strcmp(argv[1], "kernel_sort")) {
+        kernel = 1;
+    }
+
+    if (!strcmp(argv[1], "sort")) {
+        kernel = 0;
+    }
+
+    int size;
+    if (!get_int(argv[2], &size)) {
+        report(1, "Invalid number '%s'", argv[2]);
+        return false;
+    }
+
+    int bits = size;
+    for (; !(bits & 1); bits >>= 1)
+        ;
+    if (bits >> 1) {
+        report(1, "Invalid number '%s','%s' must be power of 2", argv[2],
+               argv[2]);
+        return false;
+    }
+
+    error_check();
+
+    double k;
+    // if (exception_setup(true))
+    k = average_K(size, kernel);
+    // exception_cancel();
+
+    printf("%lf\n", k);
+
+    show_queue(3);
+    return !error_check();
+}
+
 static void console_init()
 {
     ADD_COMMAND(new, "                | Create new queue");
@@ -832,6 +982,7 @@ static void console_init()
         "                | Remove from head of queue without reporting value.");
     ADD_COMMAND(reverse, "                | Reverse queue");
     ADD_COMMAND(sort, "                | Sort queue in ascending order");
+    ADD_COMMAND(kernel_sort, "        | Sort queue using kernel list_sort");
     ADD_COMMAND(
         size, " [n]            | Compute queue size n times (default: n == 1)");
     ADD_COMMAND(show, "                | Show queue contents");
@@ -840,12 +991,15 @@ static void console_init()
         dedup, "                | Delete all nodes that have duplicate string");
     ADD_COMMAND(swap,
                 "                | Swap every two adjacent nodes in queue");
+    ADD_COMMAND(shuffle, "                | Shuffle the queue");
+    ADD_COMMAND(average_k, "                | Experiment K");
     add_param("length", &string_length, "Maximum length of displayed string",
               NULL);
     add_param("malloc", &fail_probability, "Malloc failure probability percent",
               NULL);
     add_param("fail", &fail_limit,
               "Number of times allow queue operations to return false", NULL);
+    add_param("cmp_count", &cmp_count, "Number of times compare called", NULL);
 }
 
 /* Signal handlers */
@@ -999,8 +1153,9 @@ int main(int argc, char *argv[])
     }
 
     set_verblevel(level);
-    if (level > 1)
+    if (level > 1) {
         set_echo(true);
+    }
     if (logfile_name)
         set_logfile(logfile_name);
 
@@ -1012,5 +1167,287 @@ int main(int argc, char *argv[])
     /* Do finish_cmd() before check whether ok is true or false */
     ok = finish_cmd() && ok;
 
-    return !ok;
+    return ok ? 0 : 1;
+}
+
+
+
+__attribute__((nonnull(2, 3, 4))) static struct list_head *
+merge(void *priv, list_cmp_func_t cmp, struct list_head *a, struct list_head *b)
+{
+    struct list_head *head = NULL, **tail = &head;
+
+    for (;;) {
+        /* if equal, take 'a' -- important for sort stability */
+        if (cmp(priv, a, b) <= 0) {
+            *tail = a;
+            tail = &a->next;
+            a = a->next;
+            if (!a) {
+                *tail = b;
+                break;
+            }
+        } else {
+            *tail = b;
+            tail = &b->next;
+            b = b->next;
+            if (!b) {
+                *tail = a;
+                break;
+            }
+        }
+    }
+    return head;
+}
+
+/*
+ * Combine final list merge with restoration of standard doubly-linked
+ * list structure.  This approach duplicates code from merge(), but
+ * runs faster than the tidier alternatives of either a separate final
+ * prev-link restoration pass, or maintaining the prev links
+ * throughout.
+ */
+__attribute__((nonnull(2, 3, 4, 5))) static void merge_final(
+    void *priv,
+    list_cmp_func_t cmp,
+    struct list_head *head,
+    struct list_head *a,
+    struct list_head *b)
+{
+    struct list_head *tail = head;
+    __u8 count = 0;
+
+    for (;;) {
+        /* if equal, take 'a' -- important for sort stability */
+        if (cmp(priv, a, b) <= 0) {
+            tail->next = a;
+            a->prev = tail;
+            tail = a;
+            a = a->next;
+            if (!a)
+                break;
+        } else {
+            tail->next = b;
+            b->prev = tail;
+            tail = b;
+            b = b->next;
+            if (!b) {
+                b = a;
+                break;
+            }
+        }
+    }
+
+    /* Finish linking remainder of list b on to tail */
+    tail->next = b;
+    do {
+        /*
+         * If the merge is highly unbalanced (e.g. the input is
+         * already sorted), this loop may run many iterations.
+         * Continue callbacks to the client even though no
+         * element comparison is needed, so the client's cmp()
+         * routine can invoke cond_resched() periodically.
+         */
+        if (unlikely(!++count))
+            cmp(priv, b, b);
+        b->prev = tail;
+        tail = b;
+        b = b->next;
+    } while (b);
+
+    /* And the final links to make a circular doubly-linked list */
+    tail->next = head;
+    head->prev = tail;
+}
+
+/**
+ * list_sort - sort a list
+ * @priv: private data, opaque to list_sort(), passed to @cmp
+ * @head: the list to sort
+ * @cmp: the elements comparison function
+ *
+ * The comparison function @cmp must return > 0 if @a should sort after
+ * @b ("@a > @b" if you want an ascending sort), and <= 0 if @a should
+ * sort before @b *or* their original order should be preserved.  It is
+ * always called with the element that came first in the input in @a,
+ * and list_sort is a stable sort, so it is not necessary to distinguish
+ * the @a < @b and @a == @b cases.
+ *
+ * This is compatible with two styles of @cmp function:
+ * - The traditional style which returns <0 / =0 / >0, or
+ * - Returning a boolean 0/1.
+ * The latter offers a chance to save a few cycles in the comparison
+ * (which is used by e.g. plug_ctx_cmp() in block/blk-mq.c).
+ *
+ * A good way to write a multi-word comparison is::
+ *
+ *	if (a->high != b->high)
+ *		return a->high > b->high;
+ *	if (a->middle != b->middle)
+ *		return a->middle > b->middle;
+ *	return a->low > b->low;
+ *
+ *
+ * This mergesort is as eager as possible while always performing at least
+ * 2:1 balanced merges.  Given two pending sublists of size 2^k, they are
+ * merged to a size-2^(k+1) list as soon as we have 2^k following elements.
+ *
+ * Thus, it will avoid cache thrashing as long as 3*2^k elements can
+ * fit into the cache.  Not quite as good as a fully-eager bottom-up
+ * mergesort, but it does use 0.2*n fewer comparisons, so is faster in
+ * the common case that everything fits into L1.
+ *
+ *
+ * The merging is controlled by "count", the number of elements in the
+ * pending lists.  This is beautifully simple code, but rather subtle.
+ *
+ * Each time we increment "count", we set one bit (bit k) and clear
+ * bits k-1 .. 0.  Each time this happens (except the very first time
+ * for each bit, when count increments to 2^k), we merge two lists of
+ * size 2^k into one list of size 2^(k+1).
+ *
+ * This merge happens exactly when the count reaches an odd multiple of
+ * 2^k, which is when we have 2^k elements pending in smaller lists,
+ * so it's safe to merge away two lists of size 2^k.
+ *
+ * After this happens twice, we have created two lists of size 2^(k+1),
+ * which will be merged into a list of size 2^(k+2) before we create
+ * a third list of size 2^(k+1), so there are never more than two pending.
+ *
+ * The number of pending lists of size 2^k is determined by the
+ * state of bit k of "count" plus two extra pieces of information:
+ *
+ * - The state of bit k-1 (when k == 0, consider bit -1 always set), and
+ * - Whether the higher-order bits are zero or non-zero (i.e.
+ *   is count >= 2^(k+1)).
+ *
+ * There are six states we distinguish.  "x" represents some arbitrary
+ * bits, and "y" represents some arbitrary non-zero bits:
+ * 0:  00x: 0 pending of size 2^k;           x pending of sizes < 2^k
+ * 1:  01x: 0 pending of size 2^k; 2^(k-1) + x pending of sizes < 2^k
+ * 2: x10x: 0 pending of size 2^k; 2^k     + x pending of sizes < 2^k
+ * 3: x11x: 1 pending of size 2^k; 2^(k-1) + x pending of sizes < 2^k
+ * 4: y00x: 1 pending of size 2^k; 2^k     + x pending of sizes < 2^k
+ * 5: y01x: 2 pending of size 2^k; 2^(k-1) + x pending of sizes < 2^k
+ * (merge and loop back to state 2)
+ *
+ * We gain lists of size 2^k in the 2->3 and 4->5 transitions (because
+ * bit k-1 is set while the more significant bits are non-zero) and
+ * merge them away in the 5->2 transition.  Note in particular that just
+ * before the 5->2 transition, all lower-order bits are 11 (state 3),
+ * so there is one list of each smaller size.
+ *
+ * When we reach the end of the input, we merge all the pending
+ * lists, from smallest to largest.  If you work through cases 2 to
+ * 5 above, you can see that the number of elements we merge with a list
+ * of size 2^k varies from 2^(k-1) (cases 3 and 5 when x == 0) to
+ * 2^(k+1) - 1 (second merge of case 5 when x == 2^(k-1) - 1).
+ */
+__attribute__((nonnull(2, 3))) void list_sort(void *priv,
+                                              struct list_head *head,
+                                              list_cmp_func_t cmp)
+{
+    struct list_head *list = head->next, *pending = NULL;
+    size_t count = 0; /* Count of pending */
+    cmp_count = 0;
+    if (list == head->prev) /* Zero or one elements */
+        return;
+
+    /* Convert to a null-terminated singly-linked list. */
+    head->prev->next = NULL;
+
+    /*
+     * Data structure invariants:
+     * - All lists are singly linked and null-terminated; prev
+     *   pointers are not maintained.
+     * - pending is a prev-linked "list of lists" of sorted
+     *   sublists awaiting further merging.
+     * - Each of the sorted sublists is power-of-two in size.
+     * - Sublists are sorted by size and age, smallest & newest at front.
+     * - There are zero to two sublists of each size.
+     * - A pair of pending sublists are merged as soon as the number
+     *   of following pending elements equals their size (i.e.
+     *   each time count reaches an odd multiple of that size).
+     *   That ensures each later final merge will be at worst 2:1.
+     * - Each round consists of:
+     *   - Merging the two sublists selected by the highest bit
+     *     which flips when count is incremented, and
+     *   - Adding an element from the input as a size-1 sublist.
+     */
+    do {
+        size_t bits;
+        struct list_head **tail = &pending;
+
+        /* Find the least-significant clear bit in count */
+        for (bits = count; bits & 1; bits >>= 1)
+            tail = &(*tail)->prev;
+        /* Do the indicated merge */
+        if (likely(bits)) {
+            struct list_head *a = *tail, *b = a->prev;
+
+            a = merge(priv, cmp, b, a);
+            /* Install the merged result in place of the inputs */
+            a->prev = b->prev;
+            *tail = a;
+        }
+
+        /* Move one element from input list to pending */
+        list->prev = pending;
+        pending = list;
+        list = list->next;
+        pending->next = NULL;
+        count++;
+    } while (list);
+
+    /* End of input; merge together all the pending lists. */
+    list = pending;
+    pending = pending->prev;
+    for (;;) {
+        struct list_head *next = pending->prev;
+
+        if (!next)
+            break;
+        list = merge(priv, cmp, pending, list);
+        pending = next;
+    }
+    /* The final merge, rebuilding prev links */
+    merge_final(priv, cmp, head, pending, list);
+}
+
+int my_cmp(void *priv, const struct list_head *a, const struct list_head *b)
+{
+    cmp_count++;
+    return strcmp(list_entry(a, element_t, list)->value,
+                  list_entry(b, element_t, list)->value);
+}
+
+double average_K(int size, int kernel)
+{
+    FILE *fp = kernel ? fopen("k_kernel.txt", "w") : fopen("k_sort.txt", "w");
+    if (l_meta.l)
+        q_free(l_meta.l);
+    int end = size * 2;
+    double sum_k = 0;
+    for (int n = size; n < end; n++) {
+        l_meta.l = q_new();
+        for (int j = 0; j < n; j++) {
+            char randstr_buf[MAX_RANDSTR_LEN];
+            fill_rand_string(randstr_buf, sizeof(randstr_buf));
+            q_insert_tail(l_meta.l, randstr_buf);
+        }
+
+        if (kernel)
+            list_sort(NULL, l_meta.l, my_cmp);
+        else
+            q_sort(l_meta.l);
+
+        double cur_k = log2(n) - (double) (cmp_count - 1) / n;
+        fprintf(fp, "%d %lf\n", n, cur_k);
+        sum_k += cur_k;
+        q_free(l_meta.l);
+    }
+    fclose(fp);
+    l_meta.l = NULL;
+    sum_k /= size;
+    return sum_k;
 }
