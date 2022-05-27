@@ -34,6 +34,11 @@ element_t *element_new(char *s)
     return node;
 }
 
+void q_release_element(element_t *e)
+{
+    free(e->value);
+    free(e);
+}
 
 /* Create an empty queue */
 struct list_head *q_new()
