@@ -21,11 +21,6 @@ element_t *element_new(char *s)
     element_t *node;
     if (!(node = malloc(sizeof(element_t))))
         return NULL;
-    node->value = NULL;
-
-    if (s == NULL)
-        return node;
-
     int s_len = strlen(s) + 1;
     /*char array*/
     char *str;
@@ -95,7 +90,7 @@ element_t *q_remove_head(struct list_head *head, char *sp, size_t bufsize)
     struct list_head *rm_node = head->next;
     list_del(rm_node);
     element_t *rm_ele = list_entry(rm_node, element_t, list);
-    if (!sp || !rm_ele->value)
+    if (!sp || !(rm_ele->value))
         return rm_ele;
     strncpy(sp, rm_ele->value, bufsize);
     sp[bufsize - 1] = '\0';
