@@ -189,7 +189,7 @@ struct list_head *merge(struct list_head *left, struct list_head *right)
                      list_entry(right, element_t, list)->value);
     struct list_head **chosen = cmp <= 0 ? &left : &right;
     head = *chosen;
-    (*chosen) = (*chosen)->next;
+    *chosen = (*chosen)->next;
     list_del_init(head);
 
     while (left->next != head || right->next != head) {
