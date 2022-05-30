@@ -21,7 +21,7 @@ element_t *element_new(char *s)
     element_t *node;
     if (!(node = malloc(sizeof(element_t))))
         return NULL;
-    int s_len = strnlen(s) + 1;
+    int s_len = strlen(s) + 1;
     /*char array*/
     char *str;
     /* sizeof(char)=1*/
