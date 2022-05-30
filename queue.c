@@ -6,7 +6,7 @@
 
 #include "harness.h"
 #include "queue.h"
-#define STACKSIZE 1000000
+#define STACKSIZE 100000
 int cmp_count = 0;
 
 /* Notice: sometimes, Cppcheck would find the potential NULL pointer bugs,
@@ -192,7 +192,7 @@ struct list_head *merge(struct list_head *left, struct list_head *right)
     *chosen = (*chosen)->next;
     list_del_init(head);
 
-    while (left->next != head || right->next != head) {
+    while (left->next != head && right->next != head) {
         cmp_count++;
         cmp = strcmp(list_entry(left, element_t, list)->value,
                      list_entry(right, element_t, list)->value);
