@@ -7,6 +7,8 @@
 #include "harness.h"
 #include "queue.h"
 #define STACKSIZE 1000000
+#define MAX_STR_SIZE \
+    1024  // It stands for max string size that is used for strnlen.
 int cmp_count = 0;
 
 /* Notice: sometimes, Cppcheck would find the potential NULL pointer bugs,
@@ -21,7 +23,7 @@ element_t *element_new(char *s)
     element_t *node;
     if (!(node = malloc(sizeof(element_t))))
         return NULL;
-    int s_len = strlen(s) + 1;
+    int s_len = strnlen(s, MAX_STR_SIZE);
     /*char array*/
     char *str;
     /* sizeof(char)=1*/
