@@ -184,7 +184,7 @@ void q_reverse(struct list_head *head)
 struct list_head *merge(struct list_head *left, struct list_head *right)
 {
     struct list_head *head;
-
+    cmp_count++;
     int cmp = strcmp(list_entry(left, element_t, list)->value,
                      list_entry(right, element_t, list)->value);
     struct list_head **chosen = cmp <= 0 ? &left : &right;
@@ -193,6 +193,7 @@ struct list_head *merge(struct list_head *left, struct list_head *right)
     list_del_init(head);
 
     while (left->next != head || right->next != head) {
+        cmp_count++;
         cmp = strcmp(list_entry(left, element_t, list)->value,
                      list_entry(right, element_t, list)->value);
         chosen = cmp <= 0 ? &left : &right;
@@ -214,6 +215,7 @@ void q_sort(struct list_head *head)
 {
     if (!head || list_empty(head) || list_is_singular(head))
         return;
+    cmp_count = 0;
     /* Each node itself is a sorted list */
     struct list_head *cur, *safe;
     list_for_each_safe (cur, safe, head)
