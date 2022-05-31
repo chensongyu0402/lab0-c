@@ -236,7 +236,7 @@ void q_sort(struct list_head *head)
             (*last) = merge((*last), next_list);
             /* Improvement */
             if (next_next_list != head && next_next_list->prev->next == head) {
-                next_next_list = next_next_list->prev->next;
+                next_next_list->prev->next = next_next_list;
                 (*last) = merge((*last), next_next_list);
                 (*last)->prev->next = head;
                 break;
